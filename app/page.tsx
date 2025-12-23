@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BookOpen, RefreshCw, X, Loader2, ChevronUp, ChevronDown, MapPin } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
@@ -55,6 +55,9 @@ export default function BibleApp() {
   const modalRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  const lastActionRef = useRef<'initial' | 'prev' | 'next' | null>(null);
+  const prevScrollHeightRef = useRef(0);
+
   const generateVerse = async () => {
     setIsLoading(true);
     try {
@@ -81,8 +84,9 @@ export default function BibleApp() {
     
     setIsModalOpen(true);
     setContextVerses([]); 
-    
     setDynamicHeader(`${currentVerse.book_name} ${currentVerse.chapter}`);
+    
+    lastActionRef.current = 'initial';
 
     try {
       const { data, error } = await supabase
@@ -100,14 +104,6 @@ export default function BibleApp() {
       }));
 
       setContextVerses(formattedData);
-      
-      setTimeout(() => {
-        const mainElement = document.getElementById('main-verse');
-        if (mainElement) {
-          mainElement.scrollIntoView({ block: 'center', behavior: 'auto' });
-        }
-      }, 400);
-
     } catch (error) {
       console.error("Erro ao buscar contexto:", error);
     }
@@ -117,9 +113,12 @@ export default function BibleApp() {
     if (isFetchingMore || contextVerses.length === 0) return;
     setIsFetchingMore(true);
 
+    if (scrollContainerRef.current) {
+      prevScrollHeightRef.current = scrollContainerRef.current.scrollHeight;
+    }
+    lastActionRef.current = 'prev';
+
     const firstId = contextVerses[0].id;
-    const container = scrollContainerRef.current;
-    const oldScrollHeight = container ? container.scrollHeight : 0;
 
     try {
       const { data, error } = await supabase
@@ -137,13 +136,6 @@ export default function BibleApp() {
           book_name: formatBookName(v.book_name)
         }));
         setContextVerses(prev => [...formattedNew, ...prev]);
-
-        requestAnimationFrame(() => {
-          if (container) {
-            const newScrollHeight = container.scrollHeight;
-            container.scrollTop = newScrollHeight - oldScrollHeight;
-          }
-        });
       }
     } catch (err) { console.error(err); } 
     finally { setIsFetchingMore(false); }
@@ -152,7 +144,8 @@ export default function BibleApp() {
   const loadMoreNext = async () => {
     if (isFetchingMore || contextVerses.length === 0) return;
     setIsFetchingMore(true);
-
+    
+    lastActionRef.current = 'next';
     const lastId = contextVerses[contextVerses.length - 1].id;
 
     try {
@@ -175,6 +168,26 @@ export default function BibleApp() {
     } catch (err) { console.error(err); } 
     finally { setIsFetchingMore(false); }
   };
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || contextVerses.length === 0) return;
+
+    if (lastActionRef.current === 'initial') {
+      const mainElement = document.getElementById('main-verse');
+      if (mainElement) {
+        mainElement.scrollIntoView({ block: 'center', behavior: 'auto' });
+      }
+      lastActionRef.current = null;
+    } 
+    else if (lastActionRef.current === 'prev') {
+      const newScrollHeight = container.scrollHeight;
+      const diff = newScrollHeight - prevScrollHeightRef.current;
+      
+      container.scrollTop += diff;
+      lastActionRef.current = null;
+    }
+  }, [contextVerses]); 
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const container = e.currentTarget;
